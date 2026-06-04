@@ -5,32 +5,118 @@ const express_1 = require("express");
 const zod_1 = require("zod");
 const auth_1 = require("../middleware/auth");
 const leadQueue_1 = require("../queue/leadQueue");
+const supabase_js_1 = require("@supabase/supabase-js");
 exports.ingestRouter = (0, express_1.Router)();
-// ─── Validation Schemas ───────────────────────────────────────────────────────
+// ─── Supabase admin client ────────────────────────────────────────────────────
+const supabaseAdmin = (0, supabase_js_1.createClient)(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+// ─── Supported sources (extension এর PLATFORMS list এর সাথে sync) ────────────
+const SUPPORTED_SOURCES = [
+    'google_maps',
+    'yellow_pages',
+    'linkedin',
+    'facebook_biz',
+    'yelp',
+    'amazon_seller',
+    'clutch',
+    'g2',
+    'instagram_biz',
+];
+// Credit cost per source (scrape API এর মতোই)
+const CREDIT_COST = {
+    google_maps: 2,
+    yellow_pages: 1,
+    linkedin: 3,
+    facebook_biz: 2,
+    yelp: 1,
+    amazon_seller: 2,
+    clutch: 1,
+    g2: 1,
+    instagram_biz: 2,
+};
+// ─── Validation Schema ────────────────────────────────────────────────────────
 const LeadSchema = zod_1.z.object({
-    source: zod_1.z.enum(['google_maps', 'linkedin']),
-    name: zod_1.z.string().min(1).max(200),
-    website: zod_1.z.string().url('website must be a valid URL').nullish(),
+    // extension থেকে company_name, SaaS থেকে name — দুটোই accept করো
+    company_name: zod_1.z.string().min(1).max(200).optional(),
+    name: zod_1.z.string().min(1).max(200).optional(),
+    source: zod_1.z.enum(SUPPORTED_SOURCES),
+    website: zod_1.z.string().url().or(zod_1.z.literal('')).nullish(),
     phone: zod_1.z.string().nullish(),
+    address: zod_1.z.string().nullish(),
     location: zod_1.z.string().nullish(),
-    rating: zod_1.z.number().min(0).max(5).nullish(),
-    reviewCount: zod_1.z.number().int().min(0).nullish(),
+    email: zod_1.z.string().email().or(zod_1.z.literal('')).nullish(),
+    rating: zod_1.z.union([zod_1.z.number(), zod_1.z.string()]).nullish().transform(val => {
+        if (typeof val === 'number')
+            return val;
+        if (typeof val === 'string' && val.trim() !== '') {
+            const parsed = parseFloat(val);
+            return isNaN(parsed) ? null : parsed;
+        }
+        return null;
+    }),
+    review_count: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).nullish(),
+    reviewCount: zod_1.z.union([zod_1.z.number(), zod_1.z.string()]).nullish(),
     industry: zod_1.z.string().nullish(),
+    company_size: zod_1.z.string().nullish(),
     employeeCount: zod_1.z.string().nullish(),
-    linkedin_url: zod_1.z.string().url('linkedin_url must be a valid URL').nullish(),
-    capturedAt: zod_1.z.number().int().nullish(),
-});
+    linkedin_url: zod_1.z.string().url().or(zod_1.z.literal('')).nullish(),
+    detail_url: zod_1.z.string().nullish(),
+    category: zod_1.z.string().nullish(),
+    description: zod_1.z.string().max(3000).nullish(),
+    founded: zod_1.z.union([zod_1.z.string(), zod_1.z.number()]).nullish(),
+    scraped_at: zod_1.z.coerce.number().nullish(),
+    capturedAt: zod_1.z.coerce.number().nullish(),
+    metadata: zod_1.z.record(zod_1.z.unknown()).nullish(),
+}).refine((data) => !!(data.company_name || data.name), { message: 'company_name or name is required' });
 const BatchSchema = zod_1.z.object({
-    leads: zod_1.z
-        .array(LeadSchema)
-        .min(1, 'At least 1 lead is required')
-        .max(50, 'Maximum 50 leads per batch'),
+    leads: zod_1.z.array(LeadSchema).min(1).max(50),
     batch_size: zod_1.z.number().int().positive().optional(),
+    user_id: zod_1.z.string().uuid().optional(), // extension থেকে আসতে পারে
 });
+// ─── Credit check & deduction ─────────────────────────────────────────────────
+async function deductCredits(userId, amount) {
+    const { data, error } = await supabaseAdmin
+        .from('users')
+        .select('credits')
+        .eq('id', userId)
+        .single();
+    if (error || !data)
+        return false;
+    if (data.credits < amount)
+        return false;
+    const { error: updateErr } = await supabaseAdmin
+        .from('users')
+        .update({ credits: data.credits - amount })
+        .eq('id', userId);
+    return !updateErr;
+}
+// ─── Normalize lead (company_name/name unify) ─────────────────────────────────
+function normalizeLead(lead, userId) {
+    return {
+        company_name: lead.company_name || lead.name || 'Unknown',
+        source: lead.source,
+        website: lead.website || null,
+        phone: lead.phone || null,
+        address: lead.address || lead.location || null,
+        email: lead.email || null,
+        rating: lead.rating || null,
+        review_count: String(lead.review_count || lead.reviewCount || ''),
+        industry: lead.industry || null,
+        company_size: lead.company_size || lead.employeeCount || null,
+        linkedin_url: lead.linkedin_url || null,
+        detail_url: lead.detail_url || null,
+        category: lead.category || null,
+        description: lead.description || null,
+        founded: lead.founded || null,
+        scraped_at: lead.scraped_at || lead.capturedAt || Date.now(),
+        metadata: lead.metadata || null,
+        user_id: userId,
+        created_at: new Date().toISOString(),
+    };
+}
 // ─── POST /api/ingest ─────────────────────────────────────────────────────────
 exports.ingestRouter.post('/ingest', auth_1.authMiddleware, async (req, res, next) => {
     try {
-        // ── 1. Validate body ────────────────────────────────────────────────────
+        // ── 1. Validate ─────────────────────────────────────────────────────────
         const parseResult = BatchSchema.safeParse(req.body);
         if (!parseResult.success) {
             res.status(422).json({
@@ -40,26 +126,59 @@ exports.ingestRouter.post('/ingest', auth_1.authMiddleware, async (req, res, nex
             return;
         }
         const { leads } = parseResult.data;
-        // ── 2. Resolve user identity (set by authMiddleware) ───────────────────
         const userId = req.user?.id;
         if (!userId) {
-            // Should never reach here because authMiddleware already guards this,
-            // but we guard defensively for type safety.
             res.status(401).json({ error: 'Unauthorized' });
             return;
         }
-        // ── 3. Enqueue individual jobs ─────────────────────────────────────────
-        const jobIds = await (0, leadQueue_1.addBatch)(leads, userId);
-        // ── 4. Respond ─────────────────────────────────────────────────────────
+        // ── 2. Credit check ─────────────────────────────────────────────────────
+        // প্রতিটি lead এর source অনুযায়ী credit cost হিসাব করো
+        const totalCreditCost = leads.reduce((sum, lead) => {
+            return sum + (CREDIT_COST[lead.source] || 1);
+        }, 0);
+        const hasCredits = await deductCredits(userId, totalCreditCost);
+        if (!hasCredits) {
+            res.status(402).json({
+                error: 'Insufficient credits',
+                required: totalCreditCost,
+                message: `This batch needs ${totalCreditCost} credits.`,
+            });
+            return;
+        }
+        // ── 3. Normalize leads ──────────────────────────────────────────────────
+        const normalized = leads.map((lead) => normalizeLead(lead, userId));
+        // ── 4. Duplicate check — same user + same website/phone ─────────────────
+        const websites = normalized.map(l => l.website).filter(Boolean);
+        const { data: existing } = await supabaseAdmin
+            .from('extension_database')
+            .select('website')
+            .eq('user_id', userId)
+            .in('website', websites);
+        const existingWebsites = new Set((existing || []).map(e => e.website));
+        const newLeads = normalized.filter(l => !l.website || !existingWebsites.has(l.website));
+        const skippedCount = normalized.length - newLeads.length;
+        if (newLeads.length === 0) {
+            res.status(200).json({
+                success: true,
+                queued: 0,
+                skipped: skippedCount,
+                message: 'All leads already exist in your database.',
+            });
+            return;
+        }
+        // ── 5. Enqueue ──────────────────────────────────────────────────────────
+        const jobIds = await (0, leadQueue_1.addBatch)(newLeads, userId);
+        // ── 6. Respond ──────────────────────────────────────────────────────────
         res.status(202).json({
             success: true,
             jobIds,
-            queued: leads.length,
-            message: 'Leads queued for processing individually',
+            queued: newLeads.length,
+            skipped: skippedCount,
+            creditsUsed: totalCreditCost,
+            message: `${newLeads.length} lead(s) queued${skippedCount > 0 ? `, ${skippedCount} duplicate(s) skipped` : ''}.`,
         });
     }
     catch (err) {
-        // Surface queue / Redis errors without exposing internals in production
         console.error('[ingest] Failed to enqueue batch:', err);
         next(err);
     }

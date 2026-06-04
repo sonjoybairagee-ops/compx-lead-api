@@ -38,10 +38,21 @@ async function authMiddleware(req, res, next) {
             };
             return next();
         }
-        // ── Path 2: x-user-id header (internal worker / service calls) ───────────
+        // ── Path 2: x-user-id header (internal worker / service calls only) ──────
+        // Security: শুধু trusted internal IPs থেকে এই header accept করা হবে।
+        // External caller যদি এই header spoof করার চেষ্টা করে, reject হবে।
         if (xUserId && xUserId.trim()) {
-            // This path is intended for trusted internal callers (e.g., queue workers).
-            // Ensure your network / firewall prevents external callers from spoofing this header.
+            const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim()
+                || req.socket.remoteAddress
+                || '';
+            const allowedIps = (process.env.INTERNAL_IPS || '127.0.0.1,::1,::ffff:127.0.0.1')
+                .split(',')
+                .map((ip) => ip.trim());
+            if (!allowedIps.includes(clientIp)) {
+                console.warn(`[auth] x-user-id blocked — untrusted IP: ${clientIp}`);
+                res.status(401).json({ error: 'Unauthorized' });
+                return;
+            }
             req.user = {
                 id: xUserId.trim(),
                 email: undefined,

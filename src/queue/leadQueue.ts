@@ -63,7 +63,7 @@ export interface LeadPayload {
   employeeCount?:string | null;
   category?:     string | null;
   description?:  string | null;
-  founded?:      string | null;
+  founded?:      string | number | null;
 
   // Platform-specific
   linkedin_url?: string | null;
