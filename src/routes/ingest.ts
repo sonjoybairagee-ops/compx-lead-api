@@ -10,15 +10,15 @@ export const ingestRouter = Router();
 const LeadSchema = z.object({
   source: z.enum(['google_maps', 'linkedin']),
   name: z.string().min(1).max(200),
-  website: z.string().url('website must be a valid URL').optional(),
-  phone: z.string().optional(),
-  location: z.string().optional(),
-  rating: z.number().min(0).max(5).optional(),
-  reviewCount: z.number().int().min(0).optional(),
-  industry: z.string().optional(),
-  employeeCount: z.string().optional(),
-  linkedin_url: z.string().url('linkedin_url must be a valid URL').optional(),
-  capturedAt: z.number().int().optional(),
+  website: z.string().url('website must be a valid URL').nullish(),
+  phone: z.string().nullish(),
+  location: z.string().nullish(),
+  rating: z.number().min(0).max(5).nullish(),
+  reviewCount: z.number().int().min(0).nullish(),
+  industry: z.string().nullish(),
+  employeeCount: z.string().nullish(),
+  linkedin_url: z.string().url('linkedin_url must be a valid URL').nullish(),
+  capturedAt: z.number().int().nullish(),
 });
 
 const BatchSchema = z.object({
