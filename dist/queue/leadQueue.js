@@ -27,21 +27,24 @@ exports.connection.on('error', (err) => console.error('[redis] Connection error:
 // ─── BullMQ Queue ─────────────────────────────────────────────────────────────
 exports.leadQueue = new bullmq_1.Queue('leads', { connection: exports.connection });
 async function addBatch(leads, userId) {
-    const job = await exports.leadQueue.add('lead-batch', {
-        leads,
-        userId,
-        addedAt: Date.now(),
-    }, {
-        attempts: 3,
-        backoff: {
-            type: 'exponential',
-            delay: 2000,
+    const jobs = leads.map((lead) => ({
+        name: 'lead-job',
+        data: {
+            lead,
+            userId,
+            addedAt: Date.now(),
         },
-        // Remove completed jobs after 1 hour to keep Redis lean
-        removeOnComplete: { age: 3600 },
-        // Keep failed jobs for 24 hours for debugging
-        removeOnFail: { age: 86400 },
-    });
-    return job.id;
+        opts: {
+            attempts: 3,
+            backoff: {
+                type: 'exponential',
+                delay: 2000,
+            },
+            removeOnComplete: { age: 3600 },
+            removeOnFail: { age: 86400 },
+        },
+    }));
+    const addedJobs = await exports.leadQueue.addBulk(jobs);
+    return addedJobs.map((j) => j.id || '');
 }
 //# sourceMappingURL=leadQueue.js.map

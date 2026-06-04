@@ -48,14 +48,14 @@ exports.ingestRouter.post('/ingest', auth_1.authMiddleware, async (req, res, nex
             res.status(401).json({ error: 'Unauthorized' });
             return;
         }
-        // ── 3. Enqueue the batch ───────────────────────────────────────────────
-        const jobId = await (0, leadQueue_1.addBatch)(leads, userId);
+        // ── 3. Enqueue individual jobs ─────────────────────────────────────────
+        const jobIds = await (0, leadQueue_1.addBatch)(leads, userId);
         // ── 4. Respond ─────────────────────────────────────────────────────────
         res.status(202).json({
             success: true,
-            jobId,
+            jobIds,
             queued: leads.length,
-            message: 'Batch queued for processing',
+            message: 'Leads queued for processing individually',
         });
     }
     catch (err) {
