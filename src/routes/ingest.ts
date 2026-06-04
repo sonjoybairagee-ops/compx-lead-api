@@ -47,11 +47,11 @@ const LeadSchema = z.object({
 
   source: z.enum(SUPPORTED_SOURCES),
 
-  website:       z.string().url().nullish(),
+  website:       z.string().url().or(z.literal('')).nullish(),
   phone:         z.string().nullish(),
   address:       z.string().nullish(),
   location:      z.string().nullish(),
-  email:         z.string().email().nullish(),
+  email:         z.string().email().or(z.literal('')).nullish(),
   rating:        z.union([z.number(), z.string()]).nullish().transform(val => {
     if (typeof val === 'number') return val;
     if (typeof val === 'string' && val.trim() !== '') {
@@ -65,13 +65,13 @@ const LeadSchema = z.object({
   industry:      z.string().nullish(),
   company_size:  z.string().nullish(),
   employeeCount: z.string().nullish(),
-  linkedin_url:  z.string().url().nullish(),
+  linkedin_url:  z.string().url().or(z.literal('')).nullish(),
   detail_url:    z.string().nullish(),
   category:      z.string().nullish(),
-  description:   z.string().max(1000).nullish(),
-  founded:       z.string().nullish(),
-  scraped_at:    z.number().int().nullish(),
-  capturedAt:    z.number().int().nullish(),
+  description:   z.string().max(3000).nullish(),
+  founded:       z.union([z.string(), z.number()]).nullish(),
+  scraped_at:    z.coerce.number().nullish(),
+  capturedAt:    z.coerce.number().nullish(),
   metadata:      z.record(z.unknown()).nullish(),
 }).refine(
   (data) => !!(data.company_name || data.name),
