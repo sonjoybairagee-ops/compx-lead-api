@@ -31,15 +31,15 @@ export const leadQueue = new Queue('leads', { connection });
 export interface LeadPayload {
   source: string;
   name: string;
-  website?: string;
-  phone?: string;
-  location?: string;
-  rating?: number;
-  reviewCount?: number;
-  industry?: string;
-  employeeCount?: string;
-  linkedin_url?: string;
-  capturedAt?: number;
+  website?: string | null;
+  phone?: string | null;
+  location?: string | null;
+  rating?: number | null;
+  reviewCount?: number | null;
+  industry?: string | null;
+  employeeCount?: string | null;
+  linkedin_url?: string | null;
+  capturedAt?: number | null;
 }
 
 export interface LeadBatchJob {
