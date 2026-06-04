@@ -42,8 +42,8 @@ export interface LeadPayload {
   capturedAt?: number | null;
 }
 
-export interface LeadBatchJob {
-  leads: LeadPayload[];
+export interface LeadJob {
+  lead: LeadPayload;
   userId: string;
   addedAt: number;
 }
@@ -51,26 +51,25 @@ export interface LeadBatchJob {
 export async function addBatch(
   leads: LeadPayload[],
   userId: string
-): Promise<string | undefined> {
-  const job = await leadQueue.add(
-    'lead-batch',
-    {
-      leads,
+): Promise<string[]> {
+  const jobs = leads.map((lead) => ({
+    name: 'lead-job',
+    data: {
+      lead,
       userId,
       addedAt: Date.now(),
-    } satisfies LeadBatchJob,
-    {
+    } satisfies LeadJob,
+    opts: {
       attempts: 3,
       backoff: {
         type: 'exponential',
         delay: 2000,
       },
-      // Remove completed jobs after 1 hour to keep Redis lean
       removeOnComplete: { age: 3600 },
-      // Keep failed jobs for 24 hours for debugging
       removeOnFail: { age: 86_400 },
-    }
-  );
+    },
+  }));
 
-  return job.id;
+  const addedJobs = await leadQueue.addBulk(jobs);
+  return addedJobs.map((j) => j.id || '');
 }

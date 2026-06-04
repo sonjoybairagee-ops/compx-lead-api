@@ -59,15 +59,15 @@ ingestRouter.post(
         return;
       }
 
-      // ── 3. Enqueue the batch ───────────────────────────────────────────────
-      const jobId = await addBatch(leads, userId);
+      // ── 3. Enqueue individual jobs ─────────────────────────────────────────
+      const jobIds = await addBatch(leads, userId);
 
       // ── 4. Respond ─────────────────────────────────────────────────────────
       res.status(202).json({
         success: true,
-        jobId,
+        jobIds,
         queued: leads.length,
-        message: 'Batch queued for processing',
+        message: 'Leads queued for processing individually',
       });
     } catch (err) {
       // Surface queue / Redis errors without exposing internals in production
