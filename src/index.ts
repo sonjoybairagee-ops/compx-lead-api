@@ -25,6 +25,8 @@ app.use(
     origin: (origin, callback) => {
       // Allow requests with no origin (e.g., curl, server-to-server)
       if (!origin) return callback(null, true);
+      // Allow Chrome Extensions
+      if (origin.startsWith('chrome-extension://')) return callback(null, true);
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
